@@ -46,7 +46,7 @@
   @media (max-width:580px) {
     main { padding:14px; }
     #stage { aspect-ratio:4/5; min-height:0; }
-    #cover { justify-content:flex-start; padding-top:16%; background:linear-gradient(135deg,#14111bd9,transparent 82%); }
+    #cover { justify-content:flex-start; padding-top:16%; background:linear-gradient(145deg,#14111be9,transparent 76%); }
     #cover.ended { justify-content:center; }
     .controls { gap:8px; }
     .actions button { padding-inline:8px; }
@@ -81,7 +81,7 @@
   </div>
   <footer>
     <span id="phase">Ready</span>
-    <span class="shortcut">Space to pause · R to replay</span>
+    <span class="shortcut">Space to play or pause · R to replay</span>
   </footer>
 </main>
 <script>
@@ -116,7 +116,7 @@ function updatePlayer() {
 
 function tick(now) {
   frameRequest = 0;
-  if (previousFrame !== null) elapsed = Math.min(duration, elapsed + Math.min((now - previousFrame) / 1000, 0.12));
+  if (previousFrame !== null) elapsed = Math.min(duration, elapsed + (now - previousFrame) / 1000);
   previousFrame = now;
   if (elapsed >= duration) playing = false;
   render();
@@ -176,10 +176,11 @@ function shot(t) {
   const bank = smooth(24, 32, t) * (1 - smooth(35, 43, t));
   const cloud = smooth(12, 17, t) * (1 - smooth(21, 26, t));
   const dawn = smooth(17, 30, t);
-  const yaw = -0.04 + 0.06 * Math.sin(t * 0.24) + 0.36 * smooth(25, 37, t);
-  const pitch = 0.015 + 0.073 * cloud - 0.19 * smooth(24, 34, t) + 0.044 * smooth(39, 44, t);
+  const yaw = -0.04 + 0.06 * Math.sin(t * 0.24) + 0.28 * smooth(25, 37, t);
+  // The camera climbs through the whiteout, then banks to reveal the valley.
+  const pitch = 0.015 + 0.073 * cloud - 0.16 * smooth(24, 34, t) + 0.044 * smooth(39, 44, t);
   const roll = 0.035 * Math.sin(t * 0.62) - 0.235 * bank + 0.024 * cloud * Math.sin(t * 8);
-  const altitude = 149 + 243 * rise + 5 * Math.sin(t * 0.7) + cloud * 2 * Math.sin(t * 11);
+  const altitude = 149 + 305 * rise + 5 * Math.sin(t * 0.7) + cloud * 2 * Math.sin(t * 11);
   const position = [-60 + 105 * Math.sin(t * 0.05) + 230 * smooth(25, 46, t), altitude, t * 59];
   const forward = [Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch), Math.cos(yaw)*Math.cos(pitch)];
   const levelRight = [Math.cos(yaw), 0, -Math.sin(yaw)];
@@ -194,7 +195,7 @@ precision highp float;
 uniform vec2 resolution;
 uniform vec3 eye, forward, right, up;
 uniform float clock, dawn, cloud, lens;
-const vec3 sun = vec3(0.376, 0.105, 0.921);
+const vec3 sun = vec3(0.307, 0.156, 0.939);
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * .1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -211,8 +212,8 @@ float fbm(vec2 p) {
 vec3 air(vec3 ray) {
   float height = max(ray.y, 0.);
   float azimuth = pow(max(dot(ray, sun), 0.), 7.);
-  vec3 horizon = mix(vec3(.31,.26,.40), mix(vec3(.69,.43,.42),vec3(1.,.70,.43),azimuth), dawn);
-  vec3 zenith = mix(vec3(.045,.062,.14),vec3(.17,.23,.38),dawn);
+  vec3 horizon = mix(vec3(.31,.26,.40), mix(vec3(.69,.43,.42),vec3(1.,.75,.48),azimuth), dawn);
+  vec3 zenith = mix(vec3(.045,.062,.14),vec3(.18,.24,.42),dawn);
   return mix(horizon,zenith,1.-exp(-4.2*height));
 }
 vec3 finish(vec3 color) {
@@ -261,7 +262,11 @@ void main() {
 }
 `;
 
-const terrainVertex = shaderHeader + `
+const terrainVertex = `#version 300 es
+precision highp float;
+uniform vec2 resolution;
+uniform vec3 eye, forward, right, up;
+uniform float lens;
 layout(location=0) in vec3 point;
 out vec3 position;
 out float ground;
@@ -295,9 +300,9 @@ void main() {
   if (ground <= .05) {
     float wave = noise(position.xz * vec2(.022,.11) + vec2(0.,clock*.62));
     float wake = smoothstep(.63,.81,wave);
-    float reflection = exp(-abs(ray.x-sun.x)*15.) * exp(-abs(ray.y+.105)*4.);
+    float reflection = exp(-abs(ray.x-sun.x)*18.) * exp(-abs(ray.y+.156)*3.);
     land = mix(vec3(.062,.10,.16),vec3(.15,.24,.31),dawn);
-    land += vec3(.043,.055,.072)*wave + dawn*reflection*(.18+.68*wake)*vec3(.56,.27,.12);
+    land += vec3(.043,.055,.072)*wave + dawn*reflection*(.18+.68*wake)*vec3(.71,.37,.16);
   }
   float fog = 1.-exp(-distance*.00039);
   fog = max(fog,.91*smoothstep(5100.,8200.,distance));
@@ -328,11 +333,11 @@ function terrainHeight(x, z) {
   const center = 128 * Math.sin(z * .0011) + 0.15 * Math.max(0, z - 1350);
   const offset = Math.abs(x - center);
   const opening = smooth(520, 1800, z);
-  const valley = smooth(78 + opening*290, 435 + opening*510, offset);
+  const valley = smooth(78 + opening*380, 435 + opening*680, offset);
   const ridges = .53 + .22*Math.sin(x*.0033+z*.0019) + .18*Math.cos(z*.005-x*.002)
     + .10*Math.sin(z*.012+x*.009) + .06*Math.cos(z*.027-x*.023);
   const teeth = Math.abs(Math.sin(x*.007+z*.0047)*Math.cos(z*.0031-x*.002));
-  const shoulders = Math.exp(-(((offset-335-opening*510)/300)**2)) * (.58+.42*Math.cos(z*.004));
+  const shoulders = Math.exp(-(((offset-335-opening*650)/300)**2)) * (.58+.42*Math.cos(z*.004));
   return -29 + 26*Math.sin(x*.018+z*.008)*smooth(55, 330, offset)
     + valley*(110+ridges*565+teeth*180) + shoulders*228;
 }
@@ -518,15 +523,16 @@ function drawCockpit(frame) {
 
   // Keep round instruments circular when the viewport changes aspect ratio.
   ink.save();
-  const stretch = (height/520) / (width/1000);
+  const stretch = Math.min(2.08, (height/520) / (width/1000));
+  const spacing = stretch > 1.4 ? 96 : 111;
   ink.translate(500,0);
   ink.scale(stretch,1);
   const climb = smooth(12,21,frame.t) * (1-smooth(22,29,frame.t));
   const airspeed = 112 + 19*frame.bank - 9*climb + 3*Math.sin(frame.t*.9);
   const flutter = .025 * Math.sin(frame.t*17) * (1+2*frame.cloud);
-  gauge(-111,467,36,"KNOTS",Math.round(airspeed),4.15+(airspeed-105)*.034+flutter,frame);
+  gauge(-spacing,467,36,"KNOTS",Math.round(airspeed),4.15+(airspeed-105)*.034+flutter,frame);
   attitude(0,467,39,frame);
-  gauge(111,467,36,"ALT · FT",Math.round(frame.altitude*3.281),3.7+frame.altitude*.0064+flutter,frame);
+  gauge(spacing,467,36,"ALT · FT",Math.round(frame.altitude*3.281),3.7+frame.altitude*.0064+flutter,frame);
   ink.restore();
 
   if (width/height > 1.2) {
@@ -564,18 +570,34 @@ function showError(error) {
   renderer = null;
   if (playing) togglePlayback();
   document.querySelectorAll("button").forEach(button => { button.disabled = true; });
+  cover.hidden = false;
+  cover.classList.remove("ended");
+  byId("caption").hidden = false;
   byId("caption").textContent = "First Light needs a browser with WebGL2 enabled.";
   byId("phase").textContent = "Playback unavailable";
   console.error(error);
 }
 
-try {
-  initWorld();
-  updatePlayer();
-  render();
-} catch (error) {
-  showError(error);
+function prepareWorld() {
+  try {
+    initWorld();
+    byId("caption").textContent = "Through a mountain pass, into the first sun of the day.";
+    byId("start").disabled = false;
+    byId("toggle").disabled = false;
+    updatePlayer();
+    render();
+  } catch (error) {
+    showError(error);
+  }
 }
+
+world.addEventListener("webglcontextlost", event => {
+  event.preventDefault();
+  showError(new Error("The WebGL2 context was lost."));
+  byId("caption").textContent = "Graphics paused. Waiting for the browser to restore the scene.";
+});
+world.addEventListener("webglcontextrestored", prepareWorld);
+prepareWorld();
 new ResizeObserver(render).observe(stage);
 </script>
 </body>
