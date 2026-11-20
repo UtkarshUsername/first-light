@@ -101,29 +101,31 @@ function updatePlayer() {
   cover.hidden = started && !ended;
   cover.classList.toggle("ended", ended);
   byId("caption").hidden = ended;
-  byId("start").textContent = ended ? "↻  Play again" : "▶  Play film";
-  byId("toggle").textContent = playing ? "Pause" : ended ? "Replay" : started ? "Resume" : "Play";
+  const coverAction = ended ? "↻  Play again" : "▶  Play film";
+  if (byId("start").textContent !== coverAction) byId("start").textContent = coverAction;
+  const action = playing ? "Pause" : ended ? "Replay" : started ? "Resume" : "Play";
+  if (byId("toggle").textContent !== action) byId("toggle").textContent = action;
   byId("replay").disabled = !started;
   byId("progress").value = elapsed;
-  byId("time").textContent = "0:" + String(Math.floor(elapsed)).padStart(2, "0") + " / 0:45";
+  const timecode = "0:" + String(Math.floor(elapsed)).padStart(2, "0") + " / 0:45";
+  if (byId("time").textContent !== timecode) byId("time").textContent = timecode;
   const phase = !started ? "Ready" : ended ? "End of flight" : elapsed < 14 ? "Mountain pass" : elapsed < 25 ? "Inside the cloud" : "Above the valley";
-  byId("phase").textContent = !playing && started && !ended ? "Paused · " + phase : phase;
+  const status = !playing && started && !ended ? "Paused · " + phase : phase;
+  if (byId("phase").textContent !== status) byId("phase").textContent = status;
 }
 
 function tick(now) {
   frameRequest = 0;
   if (previousFrame !== null) elapsed = Math.min(duration, elapsed + Math.min((now - previousFrame) / 1000, 0.12));
   previousFrame = now;
-  if (elapsed >= duration) {
-    playing = false;
-    byId("toggle").focus({preventScroll:true});
-  }
+  if (elapsed >= duration) playing = false;
   render();
   updatePlayer();
   if (playing) frameRequest = requestAnimationFrame(tick);
 }
 
 function play(restart = false) {
+  if (!renderer) return;
   if (restart || elapsed >= duration) elapsed = 0;
   started = true;
   playing = true;
@@ -163,7 +165,6 @@ document.addEventListener("visibilitychange", () => {
 
 const world = byId("world");
 const gl = world.getContext("webgl2", {alpha:false, antialias:false, powerPreference:"default"});
-const lerp = (a, b, t) => a + (b - a) * t;
 function smooth(a, b, value) {
   const t = Math.max(0, Math.min(1, (value - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -254,11 +255,11 @@ void main() {
     float opacity = smoothstep(.50,.67,density)*smoothstep(-.017,.065,ray.y) * (.66-layer*.21);
     vec3 shadow = mix(vec3(.10,.13,.24),vec3(.36,.29,.42),dawn);
     vec3 rim = mix(vec3(.34,.31,.43),vec3(.91,.53,.40),dawn);
-    sky = mix(sky,mix(shadow,rim,smoothstep(.68,.48+0.001,density)),opacity);
+    sky = mix(sky,mix(shadow,rim,(1.-smoothstep(.48,.68,density))),opacity);
   }
   color = vec4(finish(inCloud(sky)),1.);
 }
-`.replace('smoothstep(.68,.48+0.001,density)', '(1.-smoothstep(.48,.68,density))');
+`;
 
 const terrainVertex = shaderHeader + `
 layout(location=0) in vec3 point;
@@ -411,9 +412,151 @@ function drawWorld(frame) {
   gl.drawElements(gl.TRIANGLES,renderer.count,gl.UNSIGNED_INT,0);
 }
 
+const cockpit = byId("cockpit");
+const ink = cockpit.getContext("2d");
+
+function polygon(points, fill, stroke, width = 1) {
+  ink.beginPath();
+  points.forEach(([x,y], i) => i ? ink.lineTo(x,y) : ink.moveTo(x,y));
+  ink.closePath();
+  if (fill) { ink.fillStyle = fill; ink.fill(); }
+  if (stroke) { ink.strokeStyle = stroke; ink.lineWidth = width; ink.stroke(); }
+}
+
+function line(points, color, width = 1) {
+  ink.beginPath();
+  points.forEach(([x,y], i) => i ? ink.lineTo(x,y) : ink.moveTo(x,y));
+  ink.strokeStyle = color;
+  ink.lineWidth = width;
+  ink.stroke();
+}
+
+function circle(x, y, radius, fill, stroke) {
+  ink.beginPath();
+  ink.arc(x,y,radius,0,Math.PI*2);
+  ink.fillStyle = fill;
+  ink.fill();
+  if (stroke) { ink.lineWidth = 1.5; ink.strokeStyle = stroke; ink.stroke(); }
+}
+
+function panelText(text, x, y, size, color, align = "center") {
+  ink.font = size + 'px "IBM Plex Mono", monospace';
+  ink.textAlign = align;
+  ink.fillStyle = color;
+  ink.fillText(text,x,y);
+}
+
+function gauge(x, y, radius, label, value, angle, frame) {
+  const glow = frame.dawn > .45 ? "#f4c888" : "#dbac76";
+  circle(x,y,radius+5,"#101017","#6c534a");
+  circle(x,y,radius,"#211c25","#3d3137");
+  for (let i = 0; i <= 24; i++) {
+    const a = Math.PI * (.76 + i*.0616);
+    const major = i % 4 === 0;
+    const inner = radius - (major ? 9 : 5);
+    const outer = radius - 3;
+    line([[x+Math.cos(a)*inner,y+Math.sin(a)*inner],[x+Math.cos(a)*outer,y+Math.sin(a)*outer]],
+         major ? glow : "#785d57",major ? 1.7 : 1);
+  }
+  panelText(label,x,y-radius*.30,8,"#bea08a");
+  polygon([[x-2,y],[x+Math.cos(angle)*(radius-8),y+Math.sin(angle)*(radius-8)],[x+2,y+2]],glow);
+  circle(x,y,3,"#edc59a","#523e39");
+  panelText(value,x,y+radius*.59,10,glow);
+}
+
+function attitude(x, y, radius, frame) {
+  circle(x,y,radius+6,"#111018","#76584e");
+  ink.save();
+  ink.beginPath();
+  ink.arc(x,y,radius,0,Math.PI*2);
+  ink.clip();
+  ink.translate(x,y);
+  ink.rotate(-frame.roll);
+  const horizon = frame.pitch * radius * 2.15;
+  ink.fillStyle = "#3a5264";
+  ink.fillRect(-radius*2,-radius*2,radius*4,radius*4);
+  ink.fillStyle = "#684659";
+  ink.fillRect(-radius*2,horizon,radius*4,radius*3);
+  for (let i = -2; i <= 2; i++) {
+    const span = i === 0 ? radius*2 : i%2 ? radius*.24 : radius*.43;
+    line([[-span,horizon+i*10],[span,horizon+i*10]],"#dfc0a1",i === 0 ? 1.5 : 1);
+  }
+  ink.restore();
+  line([[x-22,y],[x-10,y],[x-7,y+5],[x+7,y+5],[x+10,y],[x+22,y]],"#ffd095",2.2);
+  polygon([[x-4,y-radius+8],[x+4,y-radius+8],[x,y-radius+14]],"#ffd095");
+}
+
+function drawCockpit(frame) {
+  const width = world.width, height = world.height;
+  if (cockpit.width !== width || cockpit.height !== height) {
+    cockpit.width = width;
+    cockpit.height = height;
+  }
+  ink.setTransform(1,0,0,1,0,0);
+  ink.clearRect(0,0,width,height);
+  ink.scale(width/1000,height/520);
+
+  const light = frame.dawn;
+  const rim = light > .44 ? "#987358" : "#54424c";
+  polygon([[0,0],[145,0],[110,11],[58,21],[25,72],[0,207]],"#14131d",rim,2);
+  polygon([[1000,0],[855,0],[890,11],[942,21],[975,72],[1000,207]],"#14131d",rim,2);
+  line([[0,174],[16,68],[52,18],[123,1]],"#2a2831",4);
+  line([[1000,174],[984,68],[948,18],[877,1]],"#2a2831",4);
+  polygon([[0,164],[17,114],[31,332],[67,420],[0,486]],"#15131d",rim,2);
+  polygon([[1000,164],[983,114],[969,332],[933,420],[1000,486]],"#15131d",rim,2);
+  line([[10,177],[24,335],[50,403]],"#35313a",4);
+  line([[990,177],[976,335],[950,403]],"#35313a",4);
+
+  const dash = ink.createLinearGradient(0,383,0,520);
+  dash.addColorStop(0,light > .44 ? "#3d2d35" : "#292432");
+  dash.addColorStop(.38,"#1e1a24");
+  dash.addColorStop(1,"#100f17");
+  polygon([[0,423],[109,403],[260,390],[353,386],[393,371],[607,371],[647,386],[740,390],[891,403],[1000,423],[1000,520],[0,520]],dash,rim,2);
+  line([[0,436],[110,415],[267,403],[353,399],[402,383],[598,383],[647,399],[733,403],[890,415],[1000,436]],"#473841",2);
+  polygon([[282,430],[300,412],[700,412],[718,430],[718,520],[282,520]],"#1a161f","#59454a");
+  line([[290,513],[290,434],[304,420],[696,420],[710,434],[710,513]],"#332a35",1.5);
+
+  // Keep round instruments circular when the viewport changes aspect ratio.
+  ink.save();
+  const stretch = (height/520) / (width/1000);
+  ink.translate(500,0);
+  ink.scale(stretch,1);
+  const climb = smooth(12,21,frame.t) * (1-smooth(22,29,frame.t));
+  const airspeed = 112 + 19*frame.bank - 9*climb + 3*Math.sin(frame.t*.9);
+  const flutter = .025 * Math.sin(frame.t*17) * (1+2*frame.cloud);
+  gauge(-111,467,36,"KNOTS",Math.round(airspeed),4.15+(airspeed-105)*.034+flutter,frame);
+  attitude(0,467,39,frame);
+  gauge(111,467,36,"ALT · FT",Math.round(frame.altitude*3.281),3.7+frame.altitude*.0064+flutter,frame);
+  ink.restore();
+
+  if (width/height > 1.2) {
+    polygon([[102,448],[109,432],[228,424],[246,437],[246,498],[101,505]],"#201a24","#503d45");
+    polygon([[898,448],[891,432],[772,424],[754,437],[754,498],[899,505]],"#201a24","#503d45");
+    panelText("CABIN",176,449,9,"#be9d86");
+    panelText("ON",823,448,9,"#be9d86");
+    for (let i=0;i<4;i++) {
+      const x = 141+i*24;
+      circle(x,465,4,i===0 ? "#e3a96e" : "#362b31","#6a5150");
+      line([[x+648,477],[x+648,461]],"#6c5556",5);
+      line([[x+645,465+i*2],[x+651,465+i*2]],"#dbac76",2);
+    }
+    line([[123,489],[224,483]],"#3f333c");
+    line([[776,483],[877,489]],"#3f333c");
+  }
+
+  // A little warm glass reflection from the panel after the sun comes up.
+  if (light > 0) {
+    ink.globalAlpha = light * .13;
+    polygon([[650,380],[726,363],[930,369],[952,388],[904,388],[842,378]],"#f2a46f");
+    ink.globalAlpha = 1;
+  }
+}
+
 function render() {
   if (!renderer) return;
-  drawWorld(shot(started ? elapsed : 34));
+  const frame = shot(started ? elapsed : stage.clientWidth < stage.clientHeight ? 37 : 34);
+  drawWorld(frame);
+  drawCockpit(frame);
   byId("fade").style.opacity = started ? Math.max(1-smooth(0, 1.7, elapsed), smooth(42, 45, elapsed)) : 0;
 }
 
