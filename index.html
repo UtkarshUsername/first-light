@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="A short flight through a mountain pass at dawn, rendered in your browser.">
+<title>First Light</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Silkscreen:wght@400;700&display=swap">
+<style>
+  :root { color-scheme:dark; --paper:#f5e4ce; --muted:#ac9f95; --edge:#393439; --amber:#f5b97e; --mono:"IBM Plex Mono",monospace; --pixel:"Silkscreen",monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100svh; background:#100f13; color:var(--paper); font:13px var(--mono); }
+  main { max-width:1488px; margin:auto; padding:clamp(18px,4vw,60px); }
+  header, footer, .actions { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  header { margin-bottom:16px; }
+  .brand { display:flex; align-items:center; gap:11px; font-family:var(--pixel); white-space:nowrap; }
+  .mark { width:24px; height:24px; border:1px solid #8c694c; color:var(--amber); display:grid; place-items:center; }
+  .mark::before { content:""; width:10px; height:8px; background:currentColor; clip-path:polygon(50% 0,100% 100%,50% 71%,0 100%); }
+  .meta, footer { font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+  #stage { position:relative; isolation:isolate; overflow:hidden; aspect-ratio:2.05; min-height:380px; background:#171522; border:1px solid var(--edge); }
+  canvas, #fade { position:absolute; inset:0; width:100%; height:100%; }
+  canvas { image-rendering:pixelated; }
+  #fade { pointer-events:none; background:#0e0c12; opacity:0; }
+  #cover { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; padding:clamp(25px,6vw,92px); background:linear-gradient(90deg,#13101be8,#16121d67 48%,transparent 79%); }
+  #cover[hidden] { display:none; }
+  #cover.ended { align-items:center; text-align:center; background:#0e0c12; }
+  .eyebrow { color:var(--amber); text-transform:uppercase; font-size:11px; letter-spacing:.23em; margin:0 0 17px; }
+  h1 { margin:0 0 20px; font:700 clamp(46px,8.2vw,124px)/.83 var(--pixel); letter-spacing:-.1em; text-transform:uppercase; text-shadow:3px 4px #2c2033; }
+  #caption { max-width:30ch; line-height:1.65; color:#e2d1c3; margin:0 0 25px; }
+  button { cursor:pointer; font:500 11px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--paper); background:#19171c; border:1px solid var(--edge); padding:0 13px; min-height:40px; }
+  button:hover { border-color:var(--amber); color:var(--amber); }
+  button:focus-visible { outline:2px solid var(--amber); outline-offset:4px; }
+  button:disabled { opacity:.42; cursor:default; }
+  #start { background:var(--amber); border-color:var(--amber); color:#241926; padding-inline:18px; font-weight:600; }
+  #start:hover { background:#ffcc99; }
+  .controls { display:flex; align-items:center; gap:14px; padding:12px 0; }
+  .actions { gap:6px; }
+  #time { color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; font-size:11px; }
+  progress { flex:1; min-width:20px; height:3px; appearance:none; border:0; background:#322b34; }
+  progress::-webkit-progress-bar { background:#322b34; }
+  progress::-webkit-progress-value { background:var(--amber); }
+  progress::-moz-progress-bar { background:var(--amber); }
+  footer { border-top:1px solid #2c2830; padding-top:12px; line-height:1.55; }
+  #phase { color:var(--amber); }
+  @media (max-width:580px) {
+    main { padding:14px; }
+    #stage { aspect-ratio:4/5; min-height:0; }
+    #cover { justify-content:flex-start; padding-top:16%; background:linear-gradient(135deg,#14111bd9,transparent 82%); }
+    #cover.ended { justify-content:center; }
+    .controls { gap:8px; }
+    .actions button { padding-inline:8px; }
+    footer .shortcut { display:none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand"><span class="mark" aria-hidden="true"></span>First Light</div>
+    <div class="meta">Animated short · 45 sec</div>
+  </header>
+  <section id="stage" aria-label="First Light animation">
+    <canvas id="world" aria-hidden="true"></canvas>
+    <canvas id="cockpit" aria-hidden="true"></canvas>
+    <div id="fade" aria-hidden="true"></div>
+    <div id="cover">
+      <p class="eyebrow">A flight before dawn</p>
+      <h1>First<br>Light</h1>
+      <p id="caption">Through a mountain pass, into the first sun of the day.</p>
+      <button id="start" type="button">▶&nbsp; Play film</button>
+    </div>
+  </section>
+  <div class="controls" aria-label="Playback controls">
+    <div class="actions">
+      <button id="toggle" type="button">Play</button>
+      <button id="replay" type="button" disabled>Replay</button>
+    </div>
+    <progress id="progress" max="45" value="0" aria-label="Film progress"></progress>
+    <span id="time">0:00 / 0:45</span>
+  </div>
+  <footer>
+    <span id="phase">Ready</span>
+    <span class="shortcut">Space to pause · R to replay</span>
+  </footer>
+</main>
+<script>
+"use strict";
+const byId = id => document.getElementById(id);
+const stage = byId("stage");
+const cover = byId("cover");
+const duration = 45;
+let elapsed = 0;
+let started = false;
+let playing = false;
+let previousFrame = null;
+let frameRequest = 0;
+
+function updatePlayer() {
+  const ended = elapsed >= duration;
+  cover.hidden = started && !ended;
+  cover.classList.toggle("ended", ended);
+  byId("caption").hidden = ended;
+  byId("start").textContent = ended ? "↻  Play again" : "▶  Play film";
+  byId("toggle").textContent = playing ? "Pause" : ended ? "Replay" : started ? "Resume" : "Play";
+  byId("replay").disabled = !started;
+  byId("progress").value = elapsed;
+  byId("time").textContent = "0:" + String(Math.floor(elapsed)).padStart(2, "0") + " / 0:45";
+  const phase = !started ? "Ready" : ended ? "End of flight" : elapsed < 14 ? "Mountain pass" : elapsed < 25 ? "Inside the cloud" : "Above the valley";
+  byId("phase").textContent = !playing && started && !ended ? "Paused · " + phase : phase;
+}
+
+function tick(now) {
+  frameRequest = 0;
+  if (previousFrame !== null) elapsed = Math.min(duration, elapsed + Math.min((now - previousFrame) / 1000, 0.12));
+  previousFrame = now;
+  if (elapsed >= duration) {
+    playing = false;
+    byId("toggle").focus({preventScroll:true});
+  }
+  render();
+  updatePlayer();
+  if (playing) frameRequest = requestAnimationFrame(tick);
+}
+
+function play(restart = false) {
+  if (restart || elapsed >= duration) elapsed = 0;
+  started = true;
+  playing = true;
+  previousFrame = null;
+  updatePlayer();
+  render();
+  if (!frameRequest) frameRequest = requestAnimationFrame(tick);
+}
+
+function togglePlayback() {
+  if (!playing) {
+    play();
+    return;
+  }
+  cancelAnimationFrame(frameRequest);
+  frameRequest = 0;
+  playing = false;
+  updatePlayer();
+}
+byId("start").addEventListener("click", () => {
+  play(true);
+  byId("toggle").focus({preventScroll:true});
+});
+byId("toggle").addEventListener("click", togglePlayback);
+byId("replay").addEventListener("click", () => play(true));
+document.addEventListener("keydown", event => {
+  if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.code === "Space" && !(event.target instanceof HTMLButtonElement)) {
+    event.preventDefault();
+    togglePlayback();
+  }
+  if (event.key.toLowerCase() === "r") play(true);
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && playing) togglePlayback();
+});
+
+function render() {
+  // The world and cockpit both read the current shot time.
+}
+updatePlayer();
+</script>
+</body>
+</html>
